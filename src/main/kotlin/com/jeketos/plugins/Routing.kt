@@ -1,6 +1,7 @@
 package com.jeketos.plugins
 
 import com.jeketos.data.*
+import com.jeketos.socket.SocketController
 import com.jeketos.storage.RoomStorage
 import com.jeketos.storage.UserStorage
 import io.ktor.server.routing.*
@@ -8,6 +9,7 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 fun Application.configureRouting() {
@@ -90,8 +92,6 @@ fun Application.configureRouting() {
                 move.roomUid.isEmpty() -> return@post call.respond(message = Error.WrongRoomUid, status = HttpStatusCode.PreconditionFailed)
                 move.board.isEmpty() -> return@post call.respond(message = Error.WrongBoardData, status = HttpStatusCode.PreconditionFailed)
             }
-            println("##### roomUid = ${move.roomUid}")
-            println("##### room = ${RoomStorage.getRoomByRoomUid(move.roomUid)}")
 
             val room = RoomStorage.getRoomByRoomUid(move.roomUid) ?: return@post call.respond(
                 message = Error.RoomNotFound,
@@ -123,6 +123,7 @@ fun Application.configureRouting() {
 
             RoomStorage.replace(roomIndex, modifiedRoom)
             call.respond(modifiedRoom)
+            SocketController.sendUpdate(modifiedRoom.uid)
         }
 
         get("api/v1/giveUp/{uid?}") {

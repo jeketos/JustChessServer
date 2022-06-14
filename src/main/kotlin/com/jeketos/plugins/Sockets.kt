@@ -1,82 +1,54 @@
 package com.jeketos.plugins
 
-import io.ktor.network.selector.*
-import io.ktor.network.sockets.*
-import io.ktor.utils.io.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import java.io.InputStream
-import java.util.*
+import com.jeketos.socket.SocketController
+import com.jeketos.storage.RoomStorage
 import io.ktor.server.application.*
+import io.ktor.server.routing.*
+import io.ktor.server.websocket.*
+import io.ktor.websocket.*
+import java.time.Duration
 
 fun Application.configureSockets() {
-    
-
-}
-/**
- * Two mains are provided, you must first start EchoApp.Server, and then EchoApp.Client.
- * You can also start EchoApp.Server and then use a telnet client to connect to the echo server.
- */
-object EchoApp {
-    val selectorManager = ActorSelectorManager(Dispatchers.IO)
-    val DefaultPort = 9002
-
-    object Server {
-        @JvmStatic
-        fun main(args: Array<String>) {
-            runBlocking {
-                val serverSocket = aSocket(selectorManager).tcp().bind(port = DefaultPort)
-                println("Echo Server listening at ${serverSocket.localAddress}")
-                while (true) {
-                    val socket = serverSocket.accept()
-                    println("Accepted $socket")
-                    launch {
-                        val read = socket.openReadChannel()
-                        val write = socket.openWriteChannel(autoFlush = true)
-                        try {
-                            while (true) {
-                                val line = read.readUTF8Line()
-                                write.writeStringUtf8("$line\n")
-                            }
-                        } catch (e: Throwable) {
-                            socket.close()
-                        }
-                    }
-                }
-            }
-        }
+    install(WebSockets) {
+        pingPeriod = Duration.ofSeconds(15)
+//        timeout = Duration.ofSeconds(15)
+        maxFrameSize = Long.MAX_VALUE
+        masking = false
     }
 
-    object Client {
-        @JvmStatic
-        fun main(args: Array<String>) {
-            runBlocking {
-                val socket = aSocket(selectorManager).tcp().connect("127.0.0.1", port = DefaultPort)
-                val read = socket.openReadChannel()
-                val write = socket.openWriteChannel(autoFlush = true)
+    routing {
+        webSocket("/room/{roomUid?}/user/{userUid?}") { // websocketSession
+            val roomUid: String = call.parameters["roomUid"] ?: return@webSocket close(
+                CloseReason(
+                    CloseReason.Codes.NOT_CONSISTENT,
+                    "No room uid provided"
+                )
+            )
 
-                launch(Dispatchers.IO) {
-                    while (true) {
-                        val line = read.readUTF8Line()
-                        println("server: $line")
-                    }
-                }
+            val userUid: String = call.parameters["userUid"] ?: return@webSocket close(
+                CloseReason(
+                    CloseReason.Codes.NOT_CONSISTENT,
+                    "No user uid provided"
+                )
+            )
 
-                for (line in System.`in`.lines()) {
-                    println("client: $line")
-                    write.writeStringUtf8("$line\n")
-                }
-            }
-        }
+            val room = RoomStorage.getRoomByUserUid(userUid) ?: return@webSocket close(
+                CloseReason(
+                    CloseReason.Codes.NOT_CONSISTENT,
+                    "No such room or user"
+                )
+            )
 
-        private fun InputStream.lines() = Scanner(this).lines()
+            val socketRoom = SocketController.getOrCreateRoom(
+                roomUid = roomUid,
+                userUid = userUid,
+                webSocketSession = this
+            )
 
-        private fun Scanner.lines() = sequence {
-            while (hasNext()) {
-                yield(readLine())
+            this.outgoing.send(Frame.Text("room created. Connections - ${socketRoom.connections.size}"))
+            for (frame in this@webSocket.incoming) {
+                frame as? Frame.Text ?: continue
             }
         }
     }
 }
-
