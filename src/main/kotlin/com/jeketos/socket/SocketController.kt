@@ -37,18 +37,25 @@ object SocketController {
         }
     }
 
-    suspend fun sendUpdate(
-        roomUid: String
+    suspend fun sendEvent(
+        roomUid: String,
+        event: SocketEvents
     ) {
         rooms.find { it.roomUid == roomUid }?.apply {
             connections.forEach {
                 runCatching {
-                    it.session.outgoing.send(Frame.Text("Update"))
+                    it.session.outgoing.send(Frame.Text(event.id))
                 }.onFailure {
-                    println("#### ${it.localizedMessage}")
+                    it.printStackTrace()
                 }
             }
         }
     }
+}
+
+enum class SocketEvents(val id: String) {
+    Start("Start"),
+    Update("Update"),
+    Close("Close")
 }
 

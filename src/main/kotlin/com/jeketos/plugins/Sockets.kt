@@ -1,6 +1,7 @@
 package com.jeketos.plugins
 
 import com.jeketos.socket.SocketController
+import com.jeketos.socket.SocketEvents
 import com.jeketos.storage.RoomStorage
 import io.ktor.server.application.*
 import io.ktor.server.routing.*
@@ -46,6 +47,10 @@ fun Application.configureSockets() {
             )
 
             this.outgoing.send(Frame.Text("room created. Connections - ${socketRoom.connections.size}"))
+
+            if (socketRoom.connections.size == 2) {
+                SocketController.sendEvent(roomUid = roomUid, event = SocketEvents.Start)
+            }
             for (frame in this@webSocket.incoming) {
                 frame as? Frame.Text ?: continue
             }

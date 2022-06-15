@@ -2,6 +2,7 @@ package com.jeketos.plugins
 
 import com.jeketos.data.*
 import com.jeketos.socket.SocketController
+import com.jeketos.socket.SocketEvents
 import com.jeketos.storage.RoomStorage
 import com.jeketos.storage.UserStorage
 import io.ktor.server.routing.*
@@ -123,7 +124,7 @@ fun Application.configureRouting() {
 
             RoomStorage.replace(roomIndex, modifiedRoom)
             call.respond(modifiedRoom)
-            SocketController.sendUpdate(modifiedRoom.uid)
+            SocketController.sendEvent(roomUid = modifiedRoom.uid, event = SocketEvents.Update)
         }
 
         get("api/v1/giveUp/{uid?}") {
