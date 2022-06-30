@@ -58,4 +58,3 @@ enum class SocketEvents(val id: String) {
     Update("Update"),
     Close("Close")
 }
-
