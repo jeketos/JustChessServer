@@ -1,34 +1,31 @@
 package com.jeketos.plugins
 
-import com.auth0.jwt.JWT
-import com.auth0.jwt.algorithms.Algorithm
 import com.jeketos.Constants
 import com.jeketos.data.*
 import com.jeketos.db.dao.DAOFacade
 import com.jeketos.socket.SocketController
 import com.jeketos.socket.SocketEvents
 import com.jeketos.storage.RoomStorage
-import com.jeketos.storage.UserStorage
+import com.jeketos.utils.user
 import io.ktor.server.routing.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
+import io.ktor.websocket.*
 import java.util.*
 
 fun Application.configureRouting(dao: DAOFacade) {
     routing {
         authenticate("auth-jwt") {
-            get("api/v1/user/{uid?}") {
-                val uid: String = call.parameters["uid"] ?: return@get call.respond(
-                    message = Error.NoUid,
-                    status = HttpStatusCode.BadRequest
+            get("api/v1/user") {
+                val user = call.user() ?: return@get call.respond(
+                    message = Error.UserNotFound,
+                    status = HttpStatusCode.NotFound
                 )
 
-                UserStorage.getUser(uid)?.let {
-                    call.respond(it)
-                } ?: call.respond(message = Error.UserNotFound)
+                call.respond(user)
             }
 
             route("api/v1/rooms") {
@@ -44,51 +41,58 @@ fun Application.configureRouting(dao: DAOFacade) {
                         message = Error.RoomNotFound,
                         status = HttpStatusCode.NotFound
                     )
+
+                    if (room.gameState.winner != null) {
+                        RoomStorage.achieve(room)
+                        SocketController.sendEvent(roomUid = room.uid, event = SocketEvents.Close)
+                        SocketController.closeRoom(room.uid)
+                    }
                     call.respond(room)
                 }
-            }
-
-            route("api/v1/findGame") {
-                get("{uid?}") {
+                get("achieved/{uid}") {
                     val uid: String = call.parameters["uid"] ?: return@get call.respond(
                         message = Error.NoUid,
                         status = HttpStatusCode.BadRequest
                     )
-                    val user = UserStorage.getUser(uid)
-                    if (user != null) {
-                        val room = RoomStorage.getRoomByUserUid(uid) ?: Room(
-                            uid = UUID.randomUUID().toString(),
-                            players = Players(eagle = user),
-                            gameState = GameState(
-                                turn = user.uid,
-                                movesCount = 0,
-                                board = Constants.emptyBoard,
-                                state = State.Idle
-                            )
-                        ).also {
-                            RoomStorage.addRoom(it)
-                        }
-
-                        if (room.players.tail == null && room.players.eagle?.uid != user.uid) {
-                            room.players.tail = user
-                        }
-                        call.respond(room)
-                    } else {
-                        call.respond(
-                            message = Error.UserNotFound,
-                            status = HttpStatusCode.NotFound
-                        )
-                    }
+                    val room = RoomStorage.getAchievedRoom(uid) ?: return@get call.respond(
+                        message = Error.RoomNotFound,
+                        status = HttpStatusCode.NotFound
+                    )
+                    call.respond(room)
                 }
             }
 
+            get("api/v1/findGame") {
+                val user = call.user() ?: return@get call.respond(
+                    message = Error.UserNotFound,
+                    status = HttpStatusCode.NotFound
+                )
+                val room = RoomStorage.getRoomByUserUid(user.uid) ?: Room(
+                    uid = UUID.randomUUID().toString(),
+                    players = Players(eagle = user),
+                    gameState = GameState(
+                        turn = user.uid,
+                        movesCount = 0,
+                        board = Constants.emptyBoard,
+                        state = State.Idle
+                    )
+                ).also {
+                    RoomStorage.addRoom(it)
+                }
+                if (room.players.tail == null && room.players.eagle?.uid != user.uid) {
+                    room.players.tail = user
+                }
+                call.respond(room)
+
+            }
+
             post("api/v1/makeMove") {
+                val user = call.user() ?: return@post call.respond(
+                    message = Error.UserNotFound,
+                    status = HttpStatusCode.NotFound
+                )
                 val move = call.receive<Move>()
                 when {
-                    move.userUid.isEmpty() -> return@post call.respond(
-                        message = Error.WrongUserUid,
-                        status = HttpStatusCode.PreconditionFailed
-                    )
                     move.roomUid.isEmpty() -> return@post call.respond(
                         message = Error.WrongRoomUid,
                         status = HttpStatusCode.PreconditionFailed
@@ -111,7 +115,7 @@ fun Application.configureRouting(dao: DAOFacade) {
                         status = HttpStatusCode.PreconditionFailed
                     )
                 }
-                if (room.players.list().none { it.uid == move.userUid } || room.gameState.turn != move.userUid) {
+                if (room.players.list().none { it.uid == user.uid } || room.gameState.turn != user.uid) {
                     return@post call.respond(
                         message = Error.NotYourTurn,
                         status = HttpStatusCode.PreconditionFailed
@@ -120,7 +124,7 @@ fun Application.configureRouting(dao: DAOFacade) {
 
                 val modifiedRoom = room.copy(
                     gameState = room.gameState.copy(
-                        turn = room.players.other(move.userUid).uid,
+                        turn = room.players.other(user.uid).uid,
                         movesCount = room.gameState.movesCount + 1,
                         board = move.board,
                         state = State.Idle
@@ -132,18 +136,19 @@ fun Application.configureRouting(dao: DAOFacade) {
                 SocketController.sendEvent(roomUid = modifiedRoom.uid, event = SocketEvents.Update)
             }
 
-            get("api/v1/giveUp/{uid?}") {
-                val uid: String = call.parameters["uid"] ?: return@get call.respond(
-                    message = Error.NoUid,
-                    status = HttpStatusCode.BadRequest
+            get("api/v1/giveUp") {
+                val user = call.user() ?: return@get call.respond(
+                    message = Error.UserNotFound,
+                    status = HttpStatusCode.NotFound
                 )
-                RoomStorage.getRoomByUserUid(uid)?.let {
-                    val other = it.players.other(uid).uid
+                RoomStorage.getRoomByUserUid(user.uid)?.let {
+                    val other = it.players.other(user.uid).uid
                     val room = it.copy(
                         gameState = it.gameState.copy(turn = other, state = State.Mate, winner = other)
                     )
-                    RoomStorage.achieve(room)
+                    RoomStorage.update(room)
                     call.respond(room)
+                    SocketController.sendEvent(roomUid = room.uid, event = SocketEvents.Update)
                 } ?: call.respond(
                     message = Error.RoomNotFound,
                     status = HttpStatusCode.BadRequest

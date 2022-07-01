@@ -19,22 +19,20 @@ import java.util.*
 fun Application.configureAuth(dao: DAOFacade) {
     install(Authentication) {
         jwt("auth-jwt") {
-            realm = Constants.myRealm
             verifier(
                 JWT.require(Algorithm.HMAC256(Constants.secret))
-                    .withAudience(Constants.audience)
-                    .withIssuer(Constants.issuer)
                     .build()
             )
             validate { credential ->
-                if (credential.payload.getClaim("email").asString().isNotEmpty()) {
-                    JWTPrincipal(credential.payload)
+                val user = dao.getUser(credential.payload.getClaim(Constants.uid).asString())
+                if (user != null) {
+                    UserPrincipal(user)
                 } else {
                     null
                 }
             }
-            challenge { defaultScheme, realm ->
-                call.respond(HttpStatusCode.Unauthorized, "Token is not valid or has expired - $defaultScheme, $realm")
+            challenge { _, _ ->
+                call.respond(HttpStatusCode.Unauthorized, "Token is not valid or has expired.")
             }
         }
     }
@@ -65,7 +63,7 @@ fun Application.configureAuth(dao: DAOFacade) {
             )
             call.respond(
                 TokenWithUser(
-                    token = createToken(data.email),
+                    token = createToken(user.uid),
                     user = user
                 )
             )
@@ -77,7 +75,7 @@ fun Application.configureAuth(dao: DAOFacade) {
                 ?: return@post call.respond(HttpStatusCode.NotFound, "User not found.")
 
             if (BCrypt.verifyer().verify(credentials.password.toCharArray(), authUser.password).verified) {
-                val token = createToken(credentials.email)
+                val token = createToken(authUser.uid)
                 call.respond(
                     TokenWithUser(
                         token = token,
@@ -94,11 +92,9 @@ fun Application.configureAuth(dao: DAOFacade) {
     }
 }
 
-private fun createToken(email: String): String {
+private fun createToken(uid: String): String {
     return JWT.create()
-        .withAudience(Constants.audience)
-        .withIssuer(Constants.issuer)
-        .withClaim("email", email)
+        .withClaim(Constants.uid, uid)
         .withExpiresAt(Date(System.currentTimeMillis() + 86400000))
         .sign(Algorithm.HMAC256(Constants.secret))
 }

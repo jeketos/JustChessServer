@@ -51,6 +51,14 @@ object SocketController {
             }
         }
     }
+
+    suspend fun closeRoom(roomUid: String) {
+        val room = rooms.firstOrNull { it.roomUid == roomUid }
+        room?.connections?.forEach {
+            it.session.close()
+        }
+        rooms.remove(room)
+    }
 }
 
 enum class SocketEvents(val id: String) {

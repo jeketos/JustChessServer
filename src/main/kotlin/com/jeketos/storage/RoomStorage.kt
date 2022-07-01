@@ -13,6 +13,8 @@ object RoomStorage {
 
     fun getRoomByRoomUid(roomUid: String): Room? = rooms.find { it.uid == roomUid }
 
+    fun getAchievedRoom(roomUid: String): Room? = achieved.find { it.uid == roomUid }
+
     fun addRoom(room: Room) {
         rooms.add(room)
     }
@@ -21,6 +23,11 @@ object RoomStorage {
 
     fun replace(roomIndex: Int, modifiedRoom: Room) {
         rooms[roomIndex] = modifiedRoom
+    }
+
+    fun update(room: Room) {
+        val index = rooms.indexOfFirst { it.uid == room.uid }
+        replace(index, room)
     }
 
     fun achieve(room: Room) {

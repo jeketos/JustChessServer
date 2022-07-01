@@ -3,7 +3,9 @@ package com.jeketos.plugins
 import com.jeketos.socket.SocketController
 import com.jeketos.socket.SocketEvents
 import com.jeketos.storage.RoomStorage
+import com.jeketos.utils.user
 import io.ktor.server.application.*
+import io.ktor.server.auth.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
@@ -18,42 +20,49 @@ fun Application.configureSockets() {
     }
 
     routing {
-        webSocket("/room/{roomUid?}/user/{userUid?}") { // websocketSession
-            val roomUid: String = call.parameters["roomUid"] ?: return@webSocket close(
-                CloseReason(
-                    CloseReason.Codes.NOT_CONSISTENT,
-                    "No room uid provided"
+        authenticate("auth-jwt") {
+            webSocket("/room/{roomUid?}") {
+                val roomUid: String = call.parameters["roomUid"] ?: return@webSocket close(
+                    CloseReason(
+                        CloseReason.Codes.NOT_CONSISTENT,
+                        "No room uid provided"
+                    )
                 )
-            )
 
-            val userUid: String = call.parameters["userUid"] ?: return@webSocket close(
-                CloseReason(
-                    CloseReason.Codes.NOT_CONSISTENT,
-                    "No user uid provided"
+                val user = call.user() ?: return@webSocket close(
+                    CloseReason(
+                        CloseReason.Codes.NOT_CONSISTENT,
+                        "No authorized user"
+                    )
                 )
-            )
 
-            val room = RoomStorage.getRoomByUserUid(userUid) ?: return@webSocket close(
-                CloseReason(
-                    CloseReason.Codes.NOT_CONSISTENT,
-                    "No such room or user"
+                val room = RoomStorage.getRoomByUserUid(user.uid) ?: return@webSocket close(
+                    CloseReason(
+                        CloseReason.Codes.NOT_CONSISTENT,
+                        "No such room or user"
+                    )
                 )
-            )
 
-            val socketRoom = SocketController.getOrCreateRoom(
-                roomUid = roomUid,
-                userUid = userUid,
-                webSocketSession = this
-            )
+                val socketRoom = SocketController.getOrCreateRoom(
+                    roomUid = roomUid,
+                    userUid = user.uid,
+                    webSocketSession = this
+                )
 
-            this.outgoing.send(Frame.Text("room created. Connections - ${socketRoom.connections.size}"))
+                println("#### start web socket")
 
-            if (socketRoom.connections.size == 2) {
-                SocketController.sendEvent(roomUid = roomUid, event = SocketEvents.Start)
-            }
-            for (frame in this@webSocket.incoming) {
-                frame as? Frame.Text ?: continue
+                this.outgoing.send(Frame.Text("room created. Connections - ${socketRoom.connections.size}"))
+
+                if (socketRoom.connections.size == 2) {
+                    SocketController.sendEvent(roomUid = roomUid, event = SocketEvents.Start)
+                }
+
+                for (frame in this@webSocket.incoming) {
+                    println("#### connections - ${socketRoom.connections.size}")
+                    frame as? Frame.Text ?: continue
+                }
             }
         }
+
     }
 }

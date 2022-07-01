@@ -7,7 +7,7 @@ data class Error(
     val message: String
 ) {
     companion object {
-        val NoUid = Error("No uid provided.")
+        val NoUid = Error("User not found.")
         val WrongUserUid = Error("Wrong user uid.")
         val WrongRoomUid = Error("Wrong room uid.")
         val WrongBoardData = Error("Wrong board data.")
